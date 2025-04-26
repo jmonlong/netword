@@ -35,7 +35,7 @@ from gensim.models.keyedvectors import KeyedVectors
 model = KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin.gz',
                                           binary=True)
 
-model.wv.most_similar('tree')
+model.most_similar('tree', topn=10)
 ```
 
 Python script?
