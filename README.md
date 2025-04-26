@@ -37,3 +37,12 @@ model = KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin',
 
 model.wv.most_similar('tree')
 ```
+
+Python script?
+
+- Input:
+    - first word
+    - second word
+    - minimum similarity
+- Output:
+    - TXT/TSV with two columns: best path, number of steps
