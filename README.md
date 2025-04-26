@@ -32,7 +32,7 @@ Then the [`prepare_db.R`](prepare_db.R) script reads this embedding matrix and c
 from gensim.models.keyedvectors import KeyedVectors
 
 # load model
-model = KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin',
+model = KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin.gz',
                                           binary=True)
 
 model.wv.most_similar('tree')

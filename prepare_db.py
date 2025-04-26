@@ -1,7 +1,7 @@
 from gensim.models.keyedvectors import KeyedVectors
 
 # load model
-model = KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin',
+model = KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin.gz',
                                           binary=True)
 
 # the big matrix (3M x 300)
