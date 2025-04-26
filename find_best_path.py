@@ -1,10 +1,11 @@
 import argparse
 from gensim.models.keyedvectors import KeyedVectors
 import heapq
+import math
 
 
 def is_valid(word):
-    return word.is_alpha() and (word.lower() == word)
+    return word.isalpha() and (word.lower() == word)
 
 # Use A* algorithm to find the shortest path between start_word and end_word
 # Words must have a similarity greater than or equal to the similarity_limit
@@ -39,6 +40,9 @@ def find_path(start_word, end_word, similarity_limit):
         while prev_word != start_word:
             path.insert(0, curr_word)
             prev_word = seen_words[curr_word]
+            curr_word = prev_word
+        path.insert(0, start_word)
+        path.append(end_word)
 
     while len(to_visit) > 0:
         (curr_dist, curr_word) = heapq.heappop(to_visit)
@@ -46,55 +50,60 @@ def find_path(start_word, end_word, similarity_limit):
         # If the next word is the word we're looking for
         # I'm going to try to stop this from happening by catching it earlier but just in case
         if curr_word == end_word:
-            get_path()
+            get_path(curr_word)
+            print('unexpectedly found endword')
             return path
 
         # Try to get all words that are within the similarity limit
         # Since we can only get n at a time, progressively increase n
-        n = 1
-        print( "Loading " + str(n) + " words")
-        next_words = model.most_similar(curr_word)
-        print( "Got words")
+        n = 10
+        # print( "Loading " + str(n) + " words")
+        next_words = model.most_similar(curr_word, topn = n)
+        # print( "Got words")
         while next_words[-1][1] >= similarity_limit:
             # If the last word is still within the similarity limit, look for more
-            print("Similarity was " + str(next_words[-1][1]) + " look for " + str(n) + "more")
+            # print("Similarity was " + str(next_words[-1][1]) + " look for " + str(n) + " more")
             n *= 2
             next_words = model.most_similar(curr_word, topn = n)
 
-        print(curr_word + ": " + str(len(next_words)))
+        print(curr_word + ": " + str(len(next_words)) + ', next ' + str(next_words[-1][1]))
 
         # Go through the words connected from curr_word
         for next_word in next_words:
 
             # If this word is too far away, then we can stop 
             if next_word[1] < similarity_limit:
-                break 
+                break
 
             # If this word is the word we're looking for, then return
             elif next_word[0] == end_word:
                 # Get and return the path to the start word
                 get_path(curr_word)
+                print('found endword where expected')
                 return path
 
             # If this isn't a valid word, then skip it
-            elif not is_valid(next_word): 
+            elif not is_valid(next_word[0]): 
                 continue
 
             # If we've already seen this word, then skip it
-            elif next_word in seen_words:
+            elif next_word[0] in seen_words:
                 continue
 
             # If we got here, then this is a new word that we can use
             else:
 
                 # Add it to our seen words, pointing to the word it came from
-                seen_words[next_word] = curr_word
+                seen_words[next_word[0]] = curr_word
 
                 # Add it to the priority queue, including the predicted distance (really 1 - similarity) to the end word
-                heapq.heappush(to_visit, (floor(curr_dist)+1+(1-model.similarity(next_word, end_word)), 
-                                          next_word))
+                heapq.heappush(to_visit, (math.floor(curr_dist)+1+(1-model.similarity(next_word[0], end_word)), 
+                                          next_word[0]))
+                print("Adding ", next_word[0], ' after ', curr_word)
 
     # If we got here, then we found nothing
+    print('found nothing')
+    print(len(to_visit))
     return path
 
 
@@ -112,13 +121,12 @@ def main():
 
     path_list = find_path(args.start_word, args.end_word, args.similarity_limit)
 
-    if path_list.empty():
+    if len(path_list) == 0:
         return
 
-    print(args.start_word)
+    print("solution")
     for word in path_list:
         print(word)
-    print(args.end_word)
 
     return
 
