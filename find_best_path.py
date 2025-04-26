@@ -68,6 +68,8 @@ def find_path(start_word, end_word, similarity_limit):
 
         print(curr_word + ": " + str(len(next_words)) + ', next ' + str(next_words[-1][1]))
 
+        dist_curr_end = model.similarity(curr, end_word)
+
         # Go through the words connected from curr_word
         for next_word in next_words:
 
@@ -88,6 +90,11 @@ def find_path(start_word, end_word, similarity_limit):
 
             # If we've already seen this word, then skip it
             elif next_word[0] in seen_words:
+                continue
+
+            # If the next word seems further from the goal word than the current word
+            # Note that this means that we aren't guaranteed to get the optimal answer
+            elif model.similarity(next_word[0], end_word) < dist_curr_end:
                 continue
 
             # If we got here, then this is a new word that we can use
