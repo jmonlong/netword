@@ -10,11 +10,12 @@ def is_valid(word, accepted_words):
 # Use A* algorithm to find the shortest path between start_word and end_word
 # Words must have a similarity greater than or equal to the similarity_limit
 # Returns a list of words between start_word and end_word, not including them
-def find_path(start_word, end_word, similarity_limit, accepted_words):
+def find_path(start_word, end_word, similarity_limit,
+              accepted_words, greedy=False, sim_band=1):
 
     # load model
     model = KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin.gz',
-                                               binary=True)
+                                              binary=True)
 
     print("Loaded model")
 
@@ -66,11 +67,13 @@ def find_path(start_word, end_word, similarity_limit, accepted_words):
             n *= 2
             next_words = model.most_similar(curr_word, topn = n)
 
-        print(curr_word + ": " + str(len(next_words)) + ', next ' + str(next_words[-1][1]) + '. Heap: ', str(len(to_visit)))
+        print("{}. Heap size: {}.".format(curr_word, len(to_visit)))
 
-        dist_curr_end = model.similarity(curr_word, end_word)
+        sim_curr_end = model.similarity(curr_word, end_word)
 
         # Go through the words connected from curr_word
+        n_added = 0
+        n_skipped = 0
         for next_word in next_words:
 
             # If this word is too far away, then we can stop 
@@ -94,8 +97,9 @@ def find_path(start_word, end_word, similarity_limit, accepted_words):
 
             # If the next word seems further from the goal word than the current word
             # Note that this means that we aren't guaranteed to get the optimal answer
-            elif model.similarity(next_word[0], end_word) < dist_curr_end - .5:
-                print("\tSkipping " + str(next_word[0]))
+            # no need to do that when using the greedy approach
+            elif model.similarity(next_word[0], end_word) < sim_curr_end - sim_band and not greedy:
+                n_skipped += 1
                 continue
 
             # If we got here, then this is a new word that we can use
@@ -105,12 +109,17 @@ def find_path(start_word, end_word, similarity_limit, accepted_words):
                 seen_words[next_word[0]] = curr_word
 
                 # Add it to the priority queue, including the predicted distance (really 1 - similarity) to the end word
-                # heapq.heappush(to_visit, (math.floor(curr_dist)+1+(1-model.similarity(next_word[0], end_word)), 
-                #                           next_word[0]))
-                # trying a greedy approach, priorising by the distance to end word only
-                heapq.heappush(to_visit, (1-model.similarity(next_word[0], end_word), 
-                                          next_word[0]))
-                print("\tAdding ", next_word[0], ' after ', curr_word)
+                if greedy:
+                    # trying a greedy approach, priorising by the distance to end word only
+                    heapq.heappush(to_visit, (1-model.similarity(next_word[0], end_word),
+                                              next_word[0]))
+                else:
+                    heapq.heappush(to_visit, (math.floor(curr_dist)+1+(1-model.similarity(next_word[0], end_word)), 
+                                              next_word[0]))
+                # print("\tAdding ", next_word[0], ' after ', curr_word)
+                n_added += 1
+        print("\tAdded {}, skipped {}".format(n_added, n_skipped))
+
 
     # If we got here, then we found nothing
     print('found nothing')
@@ -118,30 +127,39 @@ def find_path(start_word, end_word, similarity_limit, accepted_words):
     return path
 
 
-
-    
-
 def main():
-    parser = argparse.ArgumentParser(description="Find the shortest path between two words. Outputs txt file with one word per line, including input words, to stdout")
+    parser = argparse.ArgumentParser(description="Find the shortest path between two words. Outputs one word per line, including input words, to stdout")
     parser.add_argument('start_word')
     parser.add_argument('end_word')
-    parser.add_argument('--similarity_limit', default = 0.95, type=float)
+    parser.add_argument('--similarity_limit', default=0.4, type=float)
+    parser.add_argument('--similarity_band', default=1, type=float,
+                        help='Similarity band to filter out some candidates. '
+                        '1 means no filtering (optimal). 0.05-0.1 could '
+                        'provide some speed up but might miss some solutions.')
+    parser.add_argument('--greedy', action='store_true',
+                        help='Use a greedy approach')
 
     args = parser.parse_args()
-    print ("Finding shortest path from \"" + args.start_word + "\" to \"" + args.end_word + " with similarity limit " + str(args.similarity_limit))
+    print("Finding shortest path from \"" + args.start_word + "\" to \"" + args.end_word + " with similarity limit " + str(args.similarity_limit))
+    if args.greedy:
+        print("Using a greedy approach")
 
     # read list of 3k common words
     accepted_words = set()
     with open('random.words.3000.txt', 'rt') as inf:
         for line in inf:
             accepted_words.add(line.rstrip().lower())
-    
-    path_list = find_path(args.start_word, args.end_word, args.similarity_limit, accepted_words)
+
+    path_list = find_path(args.start_word, args.end_word,
+                          similarity_limit=args.similarity_limit,
+                          accepted_words=accepted_words,
+                          greedy=args.greedy,
+                          sim_band=args.similarity_band)
 
     if len(path_list) == 0:
         return
 
-    print("solution")
+    print("Found a solution in {} steps:".format(len(path_list) - 2))
     for word in path_list:
         print(word)
 

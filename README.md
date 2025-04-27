@@ -23,26 +23,28 @@ Then the [`prepare_db.R`](prepare_db.R) script reads this embedding matrix and c
 
 ## Finding the best solution
 
-*Xian's part*
+Use the [`find_best_path.py`](find_best_path.py).
 
-- [Tutorial on how to load a pre-trained model and find nearby words](https://radimrehurek.com/gensim/auto_examples/howtos/run_downloader_api.html#sphx-glr-auto-examples-howtos-run-downloader-api-py)
-- The similarity currently used by the game in the R app is the *'dot': as the square root of the average inner product of the vector elements (sqrt(sum(x . y) / ncol(x))) capped to zero*.
+```
+usage: find_best_path.py [-h] [--similarity_limit SIMILARITY_LIMIT] [--similarity_band SIMILARITY_BAND] [--greedy] start_word end_word
 
-```py
-from gensim.models.keyedvectors import KeyedVectors
+Find the shortest path between two words. Outputs one word per line, including input words, to stdout
 
-# load model
-model = KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin.gz',
-                                          binary=True)
+positional arguments:
+  start_word
+  end_word
 
-model.most_similar('tree', topn=10)
+options:
+  -h, --help            show this help message and exit
+  --similarity_limit SIMILARITY_LIMIT
+  --similarity_band SIMILARITY_BAND
+                        Similarity band to filter out some candidates. 1 means no filtering (optimal). 0.05-0.1 could provide some speed up but might miss some solutions.
+  --greedy              Use a greedy approach
 ```
 
-Python script?
+Note: by default, running the script used all available cores on my laptop. 
+To change that, I set the `OPENBLAS_NUM_THREADS` variable before running the script: 
 
-- Input:
-    - first word
-    - second word
-    - minimum similarity
-- Output:
-    - TXT/TSV with two columns: best path, number of steps
+```sh
+export OPENBLAS_NUM_THREADS=1
+```
