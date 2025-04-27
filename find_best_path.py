@@ -4,13 +4,13 @@ import heapq
 import math
 
 
-def is_valid(word):
-    return word.isalpha() and (word.lower() == word)
+def is_valid(word, accepted_words):
+    return word.isalpha() and (word.lower() == word) and word in accepted_words
 
 # Use A* algorithm to find the shortest path between start_word and end_word
 # Words must have a similarity greater than or equal to the similarity_limit
 # Returns a list of words between start_word and end_word, not including them
-def find_path(start_word, end_word, similarity_limit):
+def find_path(start_word, end_word, similarity_limit, accepted_words):
 
     # load model
     model = KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin.gz',
@@ -66,9 +66,9 @@ def find_path(start_word, end_word, similarity_limit):
             n *= 2
             next_words = model.most_similar(curr_word, topn = n)
 
-        print(curr_word + ": " + str(len(next_words)) + ', next ' + str(next_words[-1][1]))
+        print(curr_word + ": " + str(len(next_words)) + ', next ' + str(next_words[-1][1]) + '. Heap: ', str(len(to_visit)))
 
-        dist_curr_end = model.similarity(curr, end_word)
+        dist_curr_end = model.similarity(curr_word, end_word)
 
         # Go through the words connected from curr_word
         for next_word in next_words:
@@ -85,7 +85,7 @@ def find_path(start_word, end_word, similarity_limit):
                 return path
 
             # If this isn't a valid word, then skip it
-            elif not is_valid(next_word[0]): 
+            elif not is_valid(next_word[0], accepted_words): 
                 continue
 
             # If we've already seen this word, then skip it
@@ -94,7 +94,8 @@ def find_path(start_word, end_word, similarity_limit):
 
             # If the next word seems further from the goal word than the current word
             # Note that this means that we aren't guaranteed to get the optimal answer
-            elif model.similarity(next_word[0], end_word) < dist_curr_end:
+            elif model.similarity(next_word[0], end_word) < dist_curr_end - .5:
+                print("\tSkipping " + str(next_word[0]))
                 continue
 
             # If we got here, then this is a new word that we can use
@@ -104,9 +105,12 @@ def find_path(start_word, end_word, similarity_limit):
                 seen_words[next_word[0]] = curr_word
 
                 # Add it to the priority queue, including the predicted distance (really 1 - similarity) to the end word
-                heapq.heappush(to_visit, (math.floor(curr_dist)+1+(1-model.similarity(next_word[0], end_word)), 
+                # heapq.heappush(to_visit, (math.floor(curr_dist)+1+(1-model.similarity(next_word[0], end_word)), 
+                #                           next_word[0]))
+                # trying a greedy approach, priorising by the distance to end word only
+                heapq.heappush(to_visit, (1-model.similarity(next_word[0], end_word), 
                                           next_word[0]))
-                print("Adding ", next_word[0], ' after ', curr_word)
+                print("\tAdding ", next_word[0], ' after ', curr_word)
 
     # If we got here, then we found nothing
     print('found nothing')
@@ -126,7 +130,13 @@ def main():
     args = parser.parse_args()
     print ("Finding shortest path from \"" + args.start_word + "\" to \"" + args.end_word + " with similarity limit " + str(args.similarity_limit))
 
-    path_list = find_path(args.start_word, args.end_word, args.similarity_limit)
+    # read list of 3k common words
+    accepted_words = set()
+    with open('random.words.3000.txt', 'rt') as inf:
+        for line in inf:
+            accepted_words.add(line.rstrip().lower())
+    
+    path_list = find_path(args.start_word, args.end_word, args.similarity_limit, accepted_words)
 
     if len(path_list) == 0:
         return
