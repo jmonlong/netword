@@ -10,14 +10,9 @@ def is_valid(word, accepted_words):
 # Use A* algorithm to find the shortest path between start_word and end_word
 # Words must have a similarity greater than or equal to the similarity_limit
 # Returns a list of words between start_word and end_word, not including them
-def find_path(start_word, end_word, similarity_limit,
-              accepted_words, greedy=False, sim_band=1):
-
-    # load model
-    model = KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin.gz',
-                                              binary=True)
-
-    print("Loaded model")
+def find_path(model, start_word, end_word, similarity_limit,
+              accepted_words, greedy=False, sim_band=1, max_words=0,
+              quiet=False):
 
     ######################### Set up A*
 
@@ -52,7 +47,8 @@ def find_path(start_word, end_word, similarity_limit,
         # I'm going to try to stop this from happening by catching it earlier but just in case
         if curr_word == end_word:
             get_path(curr_word)
-            print('unexpectedly found endword')
+            if not quiet:
+                print('unexpectedly found endword')
             return path
 
         # Try to get all words that are within the similarity limit
@@ -67,13 +63,17 @@ def find_path(start_word, end_word, similarity_limit,
             n *= 2
             next_words = model.most_similar(curr_word, topn = n)
 
-        print("{}. Heap size: {}.".format(curr_word, len(to_visit)))
+        if not quiet:
+            print("{} ({}). Heap size: {}.".format(curr_word,
+                                                   round(curr_dist, 2),
+                                                   len(to_visit)))
 
         sim_curr_end = model.similarity(curr_word, end_word)
 
         # Go through the words connected from curr_word
         n_added = 0
         n_skipped = 0
+        to_add = []
         for next_word in next_words:
 
             # If this word is too far away, then we can stop 
@@ -84,11 +84,12 @@ def find_path(start_word, end_word, similarity_limit,
             elif next_word[0] == end_word:
                 # Get and return the path to the start word
                 get_path(curr_word)
-                print('found endword where expected')
+                if not quiet:
+                    print('found endword where expected')
                 return path
 
             # If this isn't a valid word, then skip it
-            elif not is_valid(next_word[0], accepted_words): 
+            elif not is_valid(next_word[0], accepted_words):
                 continue
 
             # If we've already seen this word, then skip it
@@ -104,26 +105,41 @@ def find_path(start_word, end_word, similarity_limit,
 
             # If we got here, then this is a new word that we can use
             else:
+                # we want to add this word
+                to_add.append([next_word[0],
+                               model.similarity(next_word[0], end_word)])
 
+        if len(to_add) > 0:
+            # sort the words to add by decreasing similarity with the end word
+            to_add_sorted = sorted(to_add, key=lambda ws: -ws[1])
+            # how many words to actually add
+            to_add_max = len(to_add)
+            if max_words > 0:
+                to_add_max = max(2, max_words - math.floor(curr_dist))
+            for word_score in to_add_sorted:
+                if n_added >= to_add_max:
+                    n_skipped += 1
+                    continue
                 # Add it to our seen words, pointing to the word it came from
-                seen_words[next_word[0]] = curr_word
+                seen_words[word_score[0]] = curr_word
 
                 # Add it to the priority queue, including the predicted distance (really 1 - similarity) to the end word
                 if greedy:
                     # trying a greedy approach, priorising by the distance to end word only
-                    heapq.heappush(to_visit, (1-model.similarity(next_word[0], end_word),
-                                              next_word[0]))
+                    heapq.heappush(to_visit, (1-word_score[1], word_score[0]))
                 else:
-                    heapq.heappush(to_visit, (math.floor(curr_dist)+1+(1-model.similarity(next_word[0], end_word)), 
-                                              next_word[0]))
+                    heapq.heappush(to_visit, (math.floor(curr_dist)+1+(1-word_score[1]), 
+                                              word_score[0]))
                 # print("\tAdding ", next_word[0], ' after ', curr_word)
                 n_added += 1
-        print("\tAdded {}, skipped {}".format(n_added, n_skipped))
+        if not quiet:
+            print("\tAdded {}, skipped {}".format(n_added, n_skipped))
 
 
     # If we got here, then we found nothing
-    print('found nothing')
-    print(len(to_visit))
+    if not quiet:
+        print('found nothing')
+        print(len(to_visit))
     return path
 
 
@@ -150,7 +166,12 @@ def main():
         for line in inf:
             accepted_words.add(line.rstrip().lower())
 
-    path_list = find_path(args.start_word, args.end_word,
+    # load model
+    model = KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin.gz',
+                                              binary=True)
+    print("Loaded model")
+
+    path_list = find_path(model, args.start_word, args.end_word,
                           similarity_limit=args.similarity_limit,
                           accepted_words=accepted_words,
                           greedy=args.greedy,

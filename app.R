@@ -16,55 +16,43 @@ library(visNetwork)
 ## day.words = scan('random.words.txt', '', quiet=TRUE)
 day.words = scan('random.words.1000.txt', '', quiet=TRUE)
 day.words = day.words[which(nchar(day.words)>3)]
-set.seed(as.numeric(format(Sys.time(), "%Y%m%e")))
-day.words = sample(day.words, 2)
-w1 = day.words[1]
-w2 = day.words[2]
-
-## w1 = 'dog'
-## w2 = 'tea'
+set.seed = (123456)
+day.words = matrix(sample(day.words), ncol=2, byrow=2)
+day.one = as.Date('2025-04-29')
 
 ndims = 300
-
-use.db = TRUE
+sim.method = 'cosine'
+if(sim.method == 'cosine'){
+  sim.slider = c(.1, .9, .5, .1)
+  sim.levels = c('Easy'=.3, 'Medium'=.4, 'Hard'=.5)
+}
+if(sim.method == 'dot'){
+  sim.slider = c(0.05, .15, .1, .01)
+  sim.levels = c('Easy'=.08, 'Medium'=.1, 'Hard'=.2)
+}
 
 con <- dbConnect(SQLite(), dbname = "googlenews.simple_words.opt.db")
 ## dbListTables(con)
 
+## list of words to debug
 ## words = unlist(strsplit('politician politics strong strength power international business product coffee healed cured restored restore fort fortified improved improve milk water drink trade growth grown ground beef chemical chemicals additive healthy', ' '))
 
 cache <<- list()
 
-if(use.db){
-
-  getEmb <- function(word){
-    if(is.null(cache[[word]])){
-      bucket = strtoi(substr(hash(word), 1, 5), 16) %% 100
-      res = dbGetQuery(con, paste0("SELECT * FROM words_", bucket, " WHERE word = ?"), params=word)
-      message('queryied ', word)
-      if(nrow(res) == 1){
-        cache[[word]] = as.numeric(unlist(strsplit(res$emb, '_')))
-      } else {
-        cache[[word]] = rep(NA, ndims)
-      }
-      cache <<- cache
-      ## assign("cache", cache, envir = .GlobalEnv)
-    }
-    return(cache[[word]])
-  }
-
-} else {
-
-  emb = readRDS('googlenews.simple_words.rds')
-
-  getEmb <- function(word){
-    if(all(word != rownames(emb))){
-      return(rep(NA, ndims))
+getEmb <- function(word){
+  if(is.null(cache[[word]])){
+    bucket = strtoi(substr(hash(word), 1, 5), 16) %% 100
+    res = dbGetQuery(con, paste0("SELECT * FROM words_", bucket, " WHERE word = ?"), params=word)
+    message('queryied ', word)
+    if(nrow(res) == 1){
+      cache[[word]] = as.numeric(unlist(strsplit(res$emb, '_')))
     } else {
-      return(emb[word, ])
+      cache[[word]] = rep(NA, ndims)
     }
+    cache <<- cache
+    ## assign("cache", cache, envir = .GlobalEnv)
   }
-  
+  return(cache[[word]])
 }
 
 addHighscore <- function(name, steps, difficulty, path){
@@ -75,16 +63,17 @@ addHighscore <- function(name, steps, difficulty, path){
 }
 
 checkWin <- function(wvs, min.sim, check.highscores=FALSE){
-  sim.m = word2vec_similarity(wvs, wvs)
+  words = rownames(wvs)
+  sim.m = word2vec_similarity(wvs, wvs, type=sim.method)
   nk = graph_from_adjacency_matrix(sim.m>=min.sim)
   nk.cmp = components(nk)
   nodes = tibble(label=names(nk.cmp$membership),
                  group=factor(as.numeric(nk.cmp$membership)))
-  win = nodes %>% filter(label %in% c(w1, w2)) %>% .$group %>% unique %>% length
-  win = win == 1 && all(c(w1, w2) %in% nodes$label)
+  win = nodes %>% filter(label %in% words[1:2]) %>% .$group %>% unique %>% length
+  win = win == 1 && all(words[1:2] %in% nodes$label)
   res = list(score=NA, path=NA, msg='', add.highscore=FALSE)
   if(win){
-    win_path = shortest_paths(nk, w1, w2)
+    win_path = shortest_paths(nk, words[1], words[2])
     res$score = length(win_path$vpath[[1]]) - 2
     res$path = paste0(names(V(nk))[win_path$vpath[[1]]], collapse='->')
     if(check.highscores){
@@ -114,12 +103,16 @@ checkWin <- function(wvs, min.sim, check.highscores=FALSE){
 # Define UI for app ----
 ui <- page_sidebar(
   # App title ----
-  ## title = paste0("Word game! ", w1, ' vs ', w2),
   # Sidebar panel for inputs ----
   sidebar = sidebar(
     actionButton("help", "Help"),
-    sliderInput(inputId = "min.sim", label = "Difficulty",
-      min = .05, max = .15, value = .1, step=.01),
+    selectInput(inputId = "min.sim", label="Level",
+      choices = c('Easy', 'Medium', 'Hard'),
+      selected = 'Medium'
+    ),
+    ## sliderInput(inputId = "min.sim", label = "Difficulty",
+    ##             min=sim.slider[1], max=sim.slider[2],
+    ##             value=sim.slider[3], step=sim.slider[4]),
     textInput(inputId = "new.word", label = "New word", value = ''),
     actionButton('cleanup', 'Cleanup singletons'),
     conditionalPanel('false',
@@ -139,7 +132,9 @@ ui <- page_sidebar(
 server <- function(input, output) {
   loadEmbs <- reactive({
     message('Loading embeddings')
-    words = c(w1, w2, unlist(strsplit(input$words, ' ')))
+    today = as.Date(Sys.time())
+    today.words = day.words[as.numeric(today-day.one) + 1,]
+    words = c(today.words, unlist(strsplit(input$words, ' ')))
     words = gsub(' ', '', words)
     words = unique(setdiff(words, c(' ', '')))
     print(words)
@@ -171,7 +166,8 @@ server <- function(input, output) {
   output$status <- renderText({
     message("Win check")
     wvs = loadEmbs()
-    win = checkWin(wvs, input$min.sim)
+    min.sim = sim.levels[input$min.sim]
+    win = checkWin(wvs, min.sim)
     win.msg = ''
     if(!is.na(win$score)){
       win.msg = paste0('You won in ', win$score, ' steps: ', win$path, '!')
@@ -207,9 +203,10 @@ server <- function(input, output) {
   output$cleanup.trigger <- renderText({
     input$cleanup
     wvs = isolate(loadEmbs())
+    min.sim = sim.levels[isolate(input$min.sim)]
     ## compute similarity and distance
-    sim.m = word2vec_similarity(wvs, wvs)
-    nk = graph_from_adjacency_matrix(sim.m>=isolate(input$min.sim)-.01)
+    sim.m = word2vec_similarity(wvs, wvs, type=sim.method)
+    nk = graph_from_adjacency_matrix(sim.m>=min.sim-sim.slider[4])
     nk.cmp = components(nk)
     ## words to remove
     words.torm = tibble(label=names(nk.cmp$membership),
@@ -227,10 +224,11 @@ server <- function(input, output) {
     input$refresh_highscore
     ## check for a win and add highscore if valid
     wvs = isolate(loadEmbs())
-    win = checkWin(wvs, input$min.sim, check.highscores=TRUE)
+    min.sim = sim.levels[input$min.sim]
+    win = checkWin(wvs, min.sim, check.highscores=TRUE)
     if(win$add.highscore){
       addHighscore(isolate(input$name), steps=win$score,
-                   difficulty=input$min.sim, path=win$path)
+                   difficulty=min.sim, path=win$path)
     }
     if(win$msg != ''){
       showNotification(win$msg, duration=15)
@@ -238,7 +236,7 @@ server <- function(input, output) {
     ## read highscores from DB
     hs = dbReadTable(con, 'highscores')
     day = format(Sys.time(), "%Y%m%e")
-    hs = subset(hs, date==day & difficulty == input$min.sim & name != '')
+    hs = subset(hs, date==day & difficulty == min.sim & name != '')
     ## output high scores
     if(nrow(hs) == 0){
       return('No winner yet. You could be the first!')
@@ -251,15 +249,16 @@ server <- function(input, output) {
   output$visnk <- renderVisNetwork({
     wvs = loadEmbs()
     words = rownames(wvs)
+    min.sim = sim.levels[input$min.sim]
     ## compute similarity and distance
-    sim.m = word2vec_similarity(wvs, wvs)
-    nk = graph_from_adjacency_matrix(sim.m>=input$min.sim)
+    sim.m = word2vec_similarity(wvs, wvs, type=sim.method)
+    nk = graph_from_adjacency_matrix(sim.m>=min.sim)
     nk.cmp = components(nk)
     ## nodes
     node.colpal = scales::muted(rainbow(length(nk.cmp$csize)), l=80)
     nodes = tibble(label=names(nk.cmp$membership),
                    group=factor(as.numeric(nk.cmp$membership)),
-                   font=ifelse(label== words[length(words)] & !(label %in% c(w1, w2)), '22px', '14px'),
+                   font=ifelse(label== words[length(words)] & !(label %in% words[1:2]), '22px', '14px'),
                    shape=ifelse(label %in% words[1:2], 'circle', 'box'),
                    color=node.colpal[as.numeric(group)]) %>%
       mutate(id=paste0('id_', label)) %>%
@@ -271,13 +270,13 @@ server <- function(input, output) {
       pivot_longer(-word, names_to='to') %>%
       mutate(from=paste0('id_', word), to=paste0('id_', to)) %>%
       select(from, to, value) %>% 
-      filter(from < to, value>input$min.sim - .01) %>%
+      filter(from < to, value>min.sim - sim.slider[4]) %>%
       mutate(label=round(value, 3),
-             color=ifelse(value<input$min.sim, 'grey', node.col[from]))
+             color=ifelse(value<min.sim, 'grey', node.col[from]))
     ## have we won?
-    win = checkWin(wvs, input$min.sim)
+    win = checkWin(wvs, min.sim)
     if(!is.na(win$score)){
-      win_path = shortest_paths(nk, w1, w2)
+      win_path = shortest_paths(nk, words[1], words[2])
       win_score = length(win_path$vpath[[1]]) - 2
       win_path = paste0(names(V(nk))[win_path$vpath[[1]]], collapse='->')
       win.msg = paste0('You won in ', win_score, ' steps: ', win_path, '!')

@@ -48,3 +48,6 @@ To change that, I set the `OPENBLAS_NUM_THREADS` variable before running the scr
 ```sh
 export OPENBLAS_NUM_THREADS=1
 ```
+
+Another Python script, [`prepare_best_paths.py`](prepare_best_paths.py) loads the functions defined in `find_best_path.py` and pre-compute the optimal paths for a list of word pairs and different difficulty levels.
+The random word pairs had first been selected by [`prepare_word_pairs.R`](prepare_word_pairs.R) from the list of 3000 common English words.
