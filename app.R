@@ -14,24 +14,30 @@ library(visNetwork)
 
 
 ## day.words = scan('random.words.txt', '', quiet=TRUE)
-day.words = scan('random.words.1000.txt', '', quiet=TRUE)
-day.words = day.words[which(nchar(day.words)>3)]
-set.seed = (123456)
-day.words = matrix(sample(day.words), ncol=2, byrow=2)
-day.one = as.Date('2025-04-29')
+## day.words = scan('random.words.3000.txt', '', quiet=TRUE)
+## day.words = day.words[which(nchar(day.words)>3)]
+## set.seed = (123456)
+## day.words = matrix(sample(day.words), ncol=2, byrow=2)
+
+## read pre-computed word pairs
+day.comp = read.table('word_pairs_computer.tsv', as.is=TRUE)
+colnames(day.comp) = c('word1', 'word2', 'score', 'solution', 'difficulty')
+day.words = day.comp %>% select(word1, word2) %>% unique %>% as.matrix
+day.one = as.Date('2025-05-01')
 
 ndims = 300
 sim.method = 'cosine'
 if(sim.method == 'cosine'){
   sim.slider = c(.1, .9, .5, .1)
-  sim.levels = c('Easy'=.3, 'Medium'=.4, 'Hard'=.5)
+  sim.levels = c(.3, .4, .5, .6)
 }
 if(sim.method == 'dot'){
   sim.slider = c(0.05, .15, .1, .01)
-  sim.levels = c('Easy'=.08, 'Medium'=.1, 'Hard'=.2)
+  sim.levels = c(.08, .1, .15, .2)
 }
 
-con <- dbConnect(SQLite(), dbname = "googlenews.simple_words.opt.db")
+## con <- dbConnect(SQLite(), dbname = "googlenews.simple_words.opt.db")
+con <- dbConnect(SQLite(), dbname = "glove.6B.300d.opt.db")
 ## dbListTables(con)
 
 ## list of words to debug
@@ -40,6 +46,11 @@ con <- dbConnect(SQLite(), dbname = "googlenews.simple_words.opt.db")
 cache <<- list()
 
 getEmb <- function(word){
+  if(length(cache) > 1000){
+    ## empty cache when it's too big
+    message('emptying the cache')
+    cache = list()
+  }
   if(is.null(cache[[word]])){
     bucket = strtoi(substr(hash(word), 1, 5), 16) %% 100
     res = dbGetQuery(con, paste0("SELECT * FROM words_", bucket, " WHERE word = ?"), params=word)
@@ -100,30 +111,31 @@ checkWin <- function(wvs, min.sim, check.highscores=FALSE){
   return(res)
 }
 
+btn.col = '#EEEEEE'
+
 # Define UI for app ----
 ui <- page_sidebar(
-  # App title ----
-  # Sidebar panel for inputs ----
   sidebar = sidebar(
-    actionButton("help", "Help"),
-    selectInput(inputId = "min.sim", label="Level",
-      choices = c('Easy', 'Medium', 'Hard'),
-      selected = 'Medium'
-    ),
+    actionButton("help", "Help", style=paste0('background-color: ', btn.col)),
+    selectInput(inputId="min.sim", label="Level", choices = 1:4, selected = 1),
     ## sliderInput(inputId = "min.sim", label = "Difficulty",
     ##             min=sim.slider[1], max=sim.slider[2],
     ##             value=sim.slider[3], step=sim.slider[4]),
     textInput(inputId = "new.word", label = "New word", value = ''),
-    actionButton('cleanup', 'Cleanup singletons'),
+    actionButton('cleanup', 'Cleanup singletons',
+                 style=paste0('background-color: ', btn.col)),
     conditionalPanel('false',
                      textInput('words', 'hidden', value='')),
     textOutput('status'),
     textInput('name', 'Your name', value=''),
-    actionButton('refresh_highscore', 'Save/refresh champion(s)'),
-    textOutput('highscores'),
+    actionButton('refresh_highscore', 'Save/refresh leaderboard',
+                 style=paste0('background-color: ', btn.col)),
+    h4('Leaderboard'),
+    verbatimTextOutput('highscores'),
     textOutput('word.update.trigger'),
     textOutput('cleanup.trigger'),
-    open='always'
+    open='always',
+    bg='#E8F5E9'
   ),
   visNetworkOutput('visnk', height='800px')
 )
@@ -166,7 +178,7 @@ server <- function(input, output) {
   output$status <- renderText({
     message("Win check")
     wvs = loadEmbs()
-    min.sim = sim.levels[input$min.sim]
+    min.sim = sim.levels[as.numeric(input$min.sim)]
     win = checkWin(wvs, min.sim)
     win.msg = ''
     if(!is.na(win$score)){
@@ -203,7 +215,7 @@ server <- function(input, output) {
   output$cleanup.trigger <- renderText({
     input$cleanup
     wvs = isolate(loadEmbs())
-    min.sim = sim.levels[isolate(input$min.sim)]
+    min.sim = sim.levels[as.numeric(isolate(input$min.sim))]
     ## compute similarity and distance
     sim.m = word2vec_similarity(wvs, wvs, type=sim.method)
     nk = graph_from_adjacency_matrix(sim.m>=min.sim-sim.slider[4])
@@ -224,7 +236,8 @@ server <- function(input, output) {
     input$refresh_highscore
     ## check for a win and add highscore if valid
     wvs = isolate(loadEmbs())
-    min.sim = sim.levels[input$min.sim]
+    words = rownames(wvs)
+    min.sim = sim.levels[as.numeric(input$min.sim)]
     win = checkWin(wvs, min.sim, check.highscores=TRUE)
     if(win$add.highscore){
       addHighscore(isolate(input$name), steps=win$score,
@@ -236,20 +249,34 @@ server <- function(input, output) {
     ## read highscores from DB
     hs = dbReadTable(con, 'highscores')
     day = format(Sys.time(), "%Y%m%e")
-    hs = subset(hs, date==day & difficulty == min.sim & name != '')
+    hs = hs %>% filter(date==day, difficulty == min.sim, name != '') %>%
+      select(name, step)
+    ## add computer scores
+    print(words)
+    day.comp = day.comp %>% filter(word1==words[1], word2==words[2]) %>%
+      mutate(step=score-2, name='Computer') %>%
+      filter(step >= 0, difficulty==min.sim) %>%
+      select(name, step)
+    print(day.comp)
+    ## find best score for each winner and rank
+    hs = rbind(hs, day.comp) %>% group_by(name) %>%
+      arrange(step) %>% do(head(., 1)) %>%
+      ungroup %>% arrange(step) %>%
+      mutate(rk=rank(step, ties.method='min')) %>% 
+      filter(rk<=5) %>%
+      mutate(toprint=paste0(rk, ' - ', name, ' (', step, ')'))
+    print(hs)
     ## output high scores
     if(nrow(hs) == 0){
-      return('No winner yet. You could be the first!')
+      return('No winner yet.')
     }
-    min.steps = min(hs$step)
-    hs = unique(subset(hs, step == min.steps))
-    return(paste(paste(hs$name, collapse='/'), ' in ', min.steps, ' steps'))
+    return(paste(hs$toprint, collapse='\n'))
   })
 
   output$visnk <- renderVisNetwork({
     wvs = loadEmbs()
     words = rownames(wvs)
-    min.sim = sim.levels[input$min.sim]
+    min.sim = sim.levels[as.numeric(input$min.sim)]
     ## compute similarity and distance
     sim.m = word2vec_similarity(wvs, wvs, type=sim.method)
     nk = graph_from_adjacency_matrix(sim.m>=min.sim)
