@@ -32,7 +32,3 @@ To change that, I set the `OPENBLAS_NUM_THREADS` variable before running the scr
 export OPENBLAS_NUM_THREADS=4
 ```
 
-### Next
-
-3. Look for a French pre-trained model.
-

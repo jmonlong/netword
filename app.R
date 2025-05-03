@@ -12,15 +12,8 @@ library(tidyr)
 library(igraph)
 library(visNetwork)
 
-
-## day.words = scan('random.words.txt', '', quiet=TRUE)
-## day.words = scan('random.words.3000.txt', '', quiet=TRUE)
-## day.words = day.words[which(nchar(day.words)>3)]
-## set.seed = (123456)
-## day.words = matrix(sample(day.words), ncol=2, byrow=2)
-
 ## read pre-computed word pairs
-day.comp = read.table('word_pairs_computer.tsv', as.is=TRUE)
+day.comp = read.table('word_pairs.tsv', as.is=TRUE)
 colnames(day.comp) = c('word1', 'word2', 'score', 'solution', 'difficulty')
 day.words = day.comp %>% select(word1, word2) %>% unique %>% as.matrix
 day.one = as.Date('2025-05-01')
@@ -36,12 +29,48 @@ if(sim.method == 'dot'){
   sim.levels = c(.08, .1, .15, .2)
 }
 
-## con <- dbConnect(SQLite(), dbname = "googlenews.simple_words.opt.db")
-con <- dbConnect(SQLite(), dbname = "glove.6B.300d.opt.db")
-## dbListTables(con)
+## to use the french version
+## app.lang = 'fr'
+## model.db = "frWac_no_postag_no_phrase_500_cbow_cut100.filtered.opt.db"
+## ndims = 500
 
-## list of words to debug
-## words = unlist(strsplit('politician politics strong strength power international business product coffee healed cured restored restore fort fortified improved improve milk water drink trade growth grown ground beef chemical chemicals additive healthy', ' '))
+if(all(ls() != 'app.lang')){
+  app.lang = 'en'
+}
+
+## help message in both languages
+if(app.lang == 'en'){
+  help.txt = div(
+    p(strong('Goal'), 'Connect the two target words (within circles). The target words are selected randomly every day from a list of common English words.'),
+    p(strong('How'), 'Type new words in the ', em('New word'), 'field. The word is sent when you press ', em('space'), '. Remove a word by starting with ', em('-'),
+      '. If it is close enough to another word it will be ', strong('connected and colored'),
+      ' in the network. A  grey word is not connected. A grey link means that two words are almost connected.'),
+    p(strong('Level '), 'Select a level at the top to change the minimum similarity used to define if words are ',
+      em('connected'), ' to adjust the difficulty.'),
+    p(strong('Leaderboard '), 'When you win, you can save your score (minimum steps between the target words) to the leaderboard if no one has found your solution yet.',
+      'Type you name in the ', em('Your name'), ' field and click on ', em('Save/refresh leaderboard'),
+      '. The leaderboard is specific to a difficulty level.'),
+    p(strong('Word similarity'), 'Words were placed in a high-dimentional space based on their usage context using the ', a('word2vec technique', href='https://en.wikipedia.org/wiki/Word2vec'), '. The similarity between two words is based on their distance in this space.')
+  )
+} else {
+  help.txt = div(
+    p(strong('But'), "Connecter les deux mots cibles (cercle). Ils sont choisi aléatoirement chaque jour à partir d'une liste de mots courants."),
+    p(strong('Comment'), 'Écrire de nouveaux mots dans le champ ', em('Nouveau mot'), '. Le mot est envoyé quand vous appuyez sur la touche ', em('espace'), '. Commencer par ', em('-'), 'pour enlever un mot',
+      '. Dans le réseau, si deux mots sont assez proches, ils seront ', strong('connectés and colorés'),
+      ". Un mot en gris n'est pas connecté. Une connection grise veut dire que deux mots sont presque connectés."),
+    p(strong('Niveau '), 'Selectionner le niveau pour changer la similarity minimum qui définit si deux mots sont ',
+      em('connectés'), ' pour ajuster la difficulté.'),
+    p(strong('Leaderboard '), "Quand vous gagnez, vous pouvez sauver votre score (minimum nombre de mots connectant les cibles) au leaderboard si vous avez personne n'avait trouvé votre solution.",
+      'Entrez votre nom dans le champ ', em('Votre nom'), ' et cliquez sur ', em('Sauver/rafraichir leaderboard'),
+      '. Il y a un leaderboard par niveau de difficulté.'),
+    p(strong('Similarité entre mots'), "Les mots ont été projetés dans un espace multi-dimentionnel en fonction de leur contexte d'usage en utilisant la ", a('technique word2vec', href='https://fr.wikipedia.org/wiki/Word2vec'), '. La similarité entre deux mots est basée sur leur distance dans cette espace.')
+  )
+}
+
+if(all(ls() != 'model.db')){
+  model.db = "glove.6B.300d.opt.db"
+}
+con <- dbConnect(SQLite(), dbname = model.db)
 
 cache <<- list()
 
@@ -61,7 +90,6 @@ getEmb <- function(word){
       cache[[word]] = rep(NA, ndims)
     }
     cache <<- cache
-    ## assign("cache", cache, envir = .GlobalEnv)
   }
   return(cache[[word]])
 }
@@ -92,18 +120,12 @@ checkWin <- function(wvs, min.sim, check.highscores=FALSE){
       hs = dbReadTable(con, 'highscores')
       day = format(Sys.time(), "%Y%m%e")
       hs = subset(hs, date==day & difficulty == min.sim & name != '')
-      print(hs)
-      print(nrow(hs))
-      print(res)
       ## check if champion
-      if(nrow(hs) == 0 | !any(hs$step <= res$score)){
-        res$msg = "You're the champion!"
+      if(all(hs$path != res$path)){
         res$add.highscore = TRUE
-      } else if(!any(hs$step < res$score | hs$path == res$path)){
-        res$msg = "You found a different path, you're a champion!"
-        res$add.highscore = TRUE
-      } else if(!any(hs$step < res$score)){
-        res$msg = "Someone found your solution already..."
+      } else {
+        res$msg = ifelse(app.lang=='en', "Someone found your solution already...",
+                         "Quelqu'un a déjà trouvé cette solution...")
       }
     }
   }
@@ -116,19 +138,18 @@ btn.col = '#EEEEEE'
 # Define UI for app ----
 ui <- page_sidebar(
   sidebar = sidebar(
-    actionButton("help", "Help", style=paste0('background-color: ', btn.col)),
-    selectInput(inputId="min.sim", label="Level", choices = 1:4, selected = 1),
-    ## sliderInput(inputId = "min.sim", label = "Difficulty",
-    ##             min=sim.slider[1], max=sim.slider[2],
-    ##             value=sim.slider[3], step=sim.slider[4]),
-    textInput(inputId = "new.word", label = "New word", value = ''),
-    actionButton('cleanup', 'Cleanup singletons',
+    actionButton("help", ifelse(app.lang=='en', "Help", 'Aide'),
                  style=paste0('background-color: ', btn.col)),
-    conditionalPanel('false',
-                     textInput('words', 'hidden', value='')),
+    selectInput(inputId="min.sim", label=ifelse(app.lang=='en', "Level", 'Niveau'),
+                choices = 1:4, selected = 1),
+    textInput(inputId = "new.word", label = ifelse(app.lang=='en', "New word", 'Nouveau mot'),
+              value = ''),
+    actionButton('cleanup', ifelse(app.lang=='en', 'Cleanup singletons', 'Nettoyer les singletons'),
+                 style=paste0('background-color: ', btn.col)),
+    conditionalPanel('false', textInput('words', 'hidden', value='')),
     textOutput('status'),
-    textInput('name', 'Your name', value=''),
-    actionButton('refresh_highscore', 'Save/refresh leaderboard',
+    textInput('name', ifelse(app.lang=='en', 'Your name', 'Votre nom'), value=''),
+    actionButton('refresh_highscore', ifelse(app.lang=='en', 'Save/refresh leaderboard', 'Sauver/rafraichir leaderboard'),
                  style=paste0('background-color: ', btn.col)),
     h4('Leaderboard'),
     verbatimTextOutput('highscores'),
@@ -160,19 +181,7 @@ server <- function(input, output) {
   })
 
   observeEvent(input$help, {
-    showModal(modalDialog(
-      p(strong('Goal'), 'Connect the two target words (within circles). The target words are selected randomly every day from a list of common English words.'),
-      p(strong('How'), 'Type new words in the ', em('New word'), 'field. The word is sent when you press ', em('space'), '. Remove a word by starting with ', em('-'),
-        '. If it is close enough to another word it will be ', strong('connected and colored'),
-        ' in the network. A  grey word is not connected. A grey link means that two words are almost connected.'),
-      p(strong('Difficulty '), 'Use the slider at the top to change the minimum similarity used to define if words are ',
-        em('connected'), ' to adjust the difficulty.'),
-      p(strong('Leaderboard '), 'When you win, you can save your score (minimum steps between the target words) to the leaderboard if you’ve found the shortest path and no one has found your solution yet.',
-        'Type you name in the ', em('Your name'), ' field and click on ', em('Save/refresh champion(s)'),
-        '. The leaderboard is specific to a difficulty level.'),
-      p(strong('Word similarity'), 'Words were placed in a high-dimentional space based on their usage context using the ', a('word2vec technique', href='https://en.wikipedia.org/wiki/Word2vec'), '. The similarity between two words is based on their distance in this space.'),
-      easyClose = TRUE
-    ))
+    showModal(modalDialog(help.txt))
   })
   
   output$status <- renderText({

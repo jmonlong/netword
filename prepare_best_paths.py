@@ -1,52 +1,46 @@
 import find_best_path
 from gensim.models.keyedvectors import KeyedVectors
+import argparse
+import random
 
 
-# read word pairs
-pairs = []
-inf = open('word_pairs.tsv', 'rt')
-for line in inf:
-    line = line.rstrip().split('\t')
-    pairs.append(line)
-inf.close()
+parser = argparse.ArgumentParser('Prepare solution for pairs of words')
+parser.add_argument('-m', required=True, help='model file')
+parser.add_argument('-w', required=True, help='words to use file')
+parser.add_argument('-o', required=True,
+                    help='output file (will append new lines to it)')
+parser.add_argument('-n', type=int, default=100,
+                    help='how many pairs to prepare (default 100)')
+args = parser.parse_args()
 
 # read list of 3k common words
-accepted_words = set()
-with open('random.words.3000.txt', 'rt') as inf:
+accepted_words = []
+with open(args.w, 'rt') as inf:
     for line in inf:
-        accepted_words.add(line.rstrip().lower())
+        accepted_words.append(line.rstrip().lower())
 
 # load model
-# model = KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin.gz',
-#                                           binary=True)
-model = KeyedVectors.load_word2vec_format('glove.6B.300d.txt.gz', binary=False, no_header=True)
+model = KeyedVectors.load_word2vec_format(args.m, binary=False, no_header=True)
 
 # difficulty level definition
 levels = [.3, .4, .5, .6]
 
-outf = open('word_pairs_computer.new.tsv', 'wt')
-
-# read already computed pairs
-inf = open('word_pairs_computer.tsv', 'rt')
-idx = 0
-pairs_done = set()
-for line in inf:
-    outf.write(line)
-    line = line.rstrip().split('\t')
-    if line[0] + '_' + line[1] not in pairs_done:
-        pairs_done.add(line[0] + '_' + line[1])
-        idx += 1
-inf.close()
+# open output file in "append" mode
+outf = open(args.o, 'at')
 
 # compute optimal path for the other pairs
-while idx < len(pairs):
+for idx in range(args.n):
     pair_res = []
+    words = random.sample(accepted_words, 2)
+    while not model.has_index_for(words[0]) or \
+          not model.has_index_for(words[1]):
+        words = random.sample(accepted_words, 2)
     for lvl in levels:
-        print('{} {}-{} {}'.format(idx, pairs[idx][0], pairs[idx][1], lvl))
+        print('{} {}-{} {}'.format(idx, words[0], words[1], lvl))
         # greedy first
         print('\tgreedy')
         path_list = find_best_path.find_path(model,
-                                             pairs[idx][0], pairs[idx][1],
+                                             words[0], words[1],
                                              similarity_limit=lvl,
                                              accepted_words=accepted_words,
                                              greedy=True,
@@ -54,8 +48,8 @@ while idx < len(pairs):
         solution = 'NA'
         if len(path_list) > 0:
             solution = '-'.join(path_list)
-        pair_res.append('{}\t{}\t{}\t{}\t{}'.format(pairs[idx][0],
-                                                    pairs[idx][1],
+        pair_res.append('{}\t{}\t{}\t{}\t{}'.format(words[0],
+                                                    words[1],
                                                     len(path_list),
                                                     solution, lvl))
         # skip looking for more optimal solution if greedy failed
@@ -64,7 +58,7 @@ while idx < len(pairs):
         # more optimal solution
         print('\tmore optimal')
         path_list = find_best_path.find_path(model,
-                                             pairs[idx][0], pairs[idx][1],
+                                             words[0], words[1],
                                              similarity_limit=lvl,
                                              accepted_words=accepted_words,
                                              max_words=10,
@@ -72,8 +66,8 @@ while idx < len(pairs):
         solution = 'NA'
         if len(path_list) > 0:
             solution = '-'.join(path_list)
-        pair_res.append('{}\t{}\t{}\t{}\t{}'.format(pairs[idx][0],
-                                                    pairs[idx][1],
+        pair_res.append('{}\t{}\t{}\t{}\t{}'.format(words[0],
+                                                    words[1],
                                                     len(path_list),
                                                     solution, lvl))
     # write results
